@@ -1,0 +1,233 @@
+use std::fs::{File, OpenOptions, remove_dir_all};
+use std::io::{BufRead, BufReader, Write};
+use std::collections::VecDeque;
+use rsort::{key_value, fill_the_queue, winner_tree_by_idx, internal_pool_sort, InternalNode, RawRecord, Queue};
+
+fn main() {
+    //find . -name 'rec_*' | xargs rm
+    let filename = String::from("ettoday.rec");
+    let rec_begin_pat = String::from("@Gais_REC:\n");
+    let primary_key_pat = String::from("@url:");
+    let secondary_key_pat = String::from("@SiteCode:");
+
+    let file = match File::open(filename) {
+        Ok(file) => file,
+        Err(error) => {
+            panic!("Something when wrong while opening the file. Details: {:?}", error);
+        }
+    };
+    let file_meta = match file.metadata() {
+        Ok(file_meta) => file_meta,
+        Err(error) => {
+            panic!("Cannot read the metadata from the file. Details: {:?}", error);
+        }
+    };
+
+    // The initial settings
+    // ---------------------M------K------B---
+    let memory_size: usize = 512 * 1024 * 1024; // 16 GB
+    let total_size: usize = file_meta.len() as usize; // this is the total file size
+    let chunk_size: usize = match total_size / memory_size == 0 {
+        true => 1,
+        false => 2.0f64.powf(((total_size as f64 / memory_size as f64).log2()).ceil()) as usize
+    };
+    // chunk_size, or called K-way
+    // the chuck_size must be the power of 2; the formula is 2 ^ ceil of lg N.
+
+    let queue_size: usize =  (memory_size as f64 / chunk_size as f64).ceil() as usize;
+    // there are 2-way to pick up the queue_size, one is mem_size/chunk_size,
+    // but if the total data cannot distribute evenly, we may calc the total rec size and div by chunk_size
+
+    let mut internal_chunk_sort_pool: Vec<RawRecord> = Vec::with_capacity(memory_size);
+    let mut internal_chunk_sort_pool_cur_size = 0;
+    let mut internal_chunk_count = 0;
+
+    println!("{} {} {} {}",  memory_size, total_size, chunk_size, queue_size);
+
+    // To parsing the record, using BufReader
+    let mut reader = BufReader::new(file);
+    let mut line: Vec<u8> = Vec::new();
+    let mut record_tmp: String = String::new();
+
+    if true {
+        while match reader.read_until(0xA, &mut line) {
+            Ok(read_size) => read_size > 0,
+            Err(error) => {
+                panic!("Something error while reading line. Details: {:?}", error);
+            }
+        } {
+            let repaired_line = String::from_utf8_lossy(&line);
+            if repaired_line.contains(&rec_begin_pat) {
+                // write back the record
+                // 1. check the record_tmp len
+                if record_tmp.len() > 0 {
+                    if internal_chunk_sort_pool_cur_size + record_tmp.len() < memory_size {
+                        internal_chunk_sort_pool.push(RawRecord {
+                            raw_record: record_tmp.clone(),
+                            record_size: record_tmp.len(),
+                            record_key_value: Some(match key_value(
+                                &primary_key_pat.as_str(),
+                                &record_tmp.as_str()
+                            ) {
+                                Ok(str) => str,
+                                Err(str) => str
+                            }),
+                            record_secondary_key_value: Some(match key_value(
+                                &secondary_key_pat.as_str(),
+                                &record_tmp.as_str()
+                            ) {
+                                Ok(str) => str,
+                                Err(str) => str
+                            },
+                            ),
+                            record_end: false
+                        });
+                        internal_chunk_sort_pool_cur_size += record_tmp.len()
+                    } else { // performing internal sort and write back to the file
+                        internal_pool_sort(&mut internal_chunk_sort_pool, internal_chunk_count);
+                        internal_chunk_sort_pool.clear();
+                        internal_chunk_sort_pool_cur_size = 0;
+                        internal_chunk_count += 1;
+                    }
+
+                    record_tmp.clear();
+
+                }
+            }
+            record_tmp.push_str(&repaired_line);
+            line.clear();
+        }
+        // write back the remain things
+        internal_pool_sort(&mut internal_chunk_sort_pool, internal_chunk_count);
+        internal_chunk_sort_pool.clear();
+    }
+
+    // Performing the K-way external merge sort
+    // initialising the K-way buffer
+    // we confirm that all the queues have the data
+    // ready to do K-way external merge-sort
+    // Strategies -- the loop:
+    // 1. pick up the record from top of queues
+    // P.S. because loser(winner) tree is completed binary tree; thus, we might impl by array
+    // 2. pick up the min/max which was generated by the tournament tree.
+    // 3. check each queue whether has been already empty.
+
+
+    let record_queue = Queue {
+        queue: VecDeque::with_capacity(queue_size),
+        current_size: 0,
+        record_cnt: 0,
+        end_of_record: false
+    };
+//    let mut queue_pool: Arc<Vec<Box<Queue>>> = Arc::new(vec![Box::new(record_queue); chunk_size]);
+    let mut queue_pool: Vec<Box<Queue>> = vec![Box::new(record_queue); chunk_size];
+
+    // Compute the total loser tree elements
+    let i_ele_size = chunk_size;
+    let e_ele_size = chunk_size;
+
+    // Initialising the loser tree
+
+    let mut external_node: Vec<Box<Option<RawRecord>>> =vec![Box::new(None); e_ele_size];
+    external_node.push(Box::new(Some(RawRecord::new_raw_record()))); // set a terminator
+
+    let mut internal_node = vec![InternalNode::new_non_leaf_inode(); i_ele_size / 2];
+    for _i in 0..i_ele_size / 2 {
+        internal_node.push(InternalNode::new_leaf_inode())
+    }
+
+    let mut rec_cnt = 0;
+
+
+    println!("Starting to sort");
+    let mut result_file = match OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open(format!("/tmp/result_rec_url")) {
+        Ok(file) => file,
+        Err(error) => {
+            panic!("Something error while creating temporary result record file. Details: {:?}", error);
+        }
+    };
+
+    loop {
+
+        // Iterating all the first element in each queue, and load the record from the file
+
+        for i in 0..chunk_size {
+            // check the queue top whether is the empty mark
+            let mut queue = &mut queue_pool[i];
+            // Initialising the queue.
+            fill_the_queue(&mut queue, i, queue_size, &primary_key_pat, &secondary_key_pat);
+        }
+
+
+
+        // 1. Pick up the record from top of queues, the initial run.
+        for i in 0..chunk_size {
+            if *external_node[i] == None {
+                let mut queue = &mut queue_pool[i];
+                let rec = queue.queue.pop_front();
+                *external_node[i] = rec;
+                queue.current_size -= match &*external_node[i] {
+                    Some(rec) => rec.record_size,
+                    None => 0
+                }
+            }
+        }
+
+        // 2. Send the loser tree array to loser tree function to choose the loser
+        let top = winner_tree_by_idx(&mut internal_node, &mut external_node);
+        rec_cnt += 1;
+        if rec_cnt % 10000 == 0 {
+            println!("{}", rec_cnt);
+        }
+
+        match &*external_node[top] {
+            Some(rec) => {
+                let r = match &rec.record_key_value {
+                    Some(s) => s.clone(),
+                    None => "".to_string()
+                };
+                match result_file.write(r.as_bytes()) {
+                    Ok(_size) => (),
+                    Err(_e) => {panic!("Write error");}
+                }
+                match result_file.write('\n'.to_string().as_bytes()) {
+                    Ok(_size) => (),
+                    Err(_e) => {panic!("Write error");}
+                }
+            },
+            None => {
+                break;
+            }
+        }
+
+        if *external_node[top] == None {
+            for i in 0..chunk_size {
+                // check the queue top whether is the empty mark
+                let queue = &mut queue_pool[i];
+                if queue.end_of_record == false {
+                    println!("INT{:?}", internal_node);
+                    println!("EXN{:?}", external_node);
+                    panic!("The queue should be empty");
+                }
+            }
+            break;
+        }
+
+        *external_node[top] = None;
+
+    }
+
+    // clean up the file
+    for i in 0..chunk_size {
+        match remove_dir_all(format!("/tmp/rec_chunk_{}", i)) {
+            Ok(()) => {},
+            Err(_e) => {panic!("Something went wrong while deleting the tmp file.");}
+        }
+    }
+
+
+
+}
