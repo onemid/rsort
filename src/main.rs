@@ -126,7 +126,7 @@ fn main() {
     let i_ele_size = chunk_size;
     let e_ele_size = chunk_size;
 
-    // Initialising the loser tree
+    // Initialising the winner tree
 
     let mut external_node: Vec<Box<Option<RawRecord>>> =vec![Box::new(None); e_ele_size];
     external_node.push(Box::new(Some(RawRecord::new_raw_record()))); // set a terminator
@@ -176,7 +176,7 @@ fn main() {
             }
         }
 
-        // 2. Send the loser tree array to loser tree function to choose the loser
+        // 2. Send the winner tree array to loser tree function to choose the winner
         let top = winner_tree_by_idx(&mut internal_node, &mut external_node);
         rec_cnt += 1;
         if rec_cnt % 10000 == 0 {
