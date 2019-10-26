@@ -84,7 +84,7 @@ fn main() {
                         });
                         internal_chunk_sort_pool_cur_size += record_tmp.len()
                     } else { // performing internal sort and write back to the file
-                        internal_pool_sort(&mut internal_chunk_sort_pool, internal_chunk_count);
+                        internal_pool_sort(&mut internal_chunk_sort_pool, internal_chunk_count, queue_size);
                         internal_chunk_sort_pool.clear();
                         internal_chunk_sort_pool_cur_size = 0;
                         internal_chunk_count += 1;
@@ -98,7 +98,7 @@ fn main() {
             line.clear();
         }
         // write back the remain things
-        internal_pool_sort(&mut internal_chunk_sort_pool, internal_chunk_count);
+        internal_pool_sort(&mut internal_chunk_sort_pool, internal_chunk_count, queue_size);
         internal_chunk_sort_pool.clear();
     }
 
@@ -220,12 +220,12 @@ fn main() {
     }
 
     // clean up the file
-    for i in 0..chunk_size {
-        match remove_dir_all(format!("/tmp/rec_chunk_{}", i)) {
-            Ok(()) => {},
-            Err(_e) => {panic!("Something went wrong while deleting the tmp file.");}
-        }
-    }
+//    for i in 0..chunk_size {
+//        match remove_dir_all(format!("/tmp/rec_chunk_{}", i)) {
+//            Ok(()) => {},
+//            Err(_e) => {panic!("Something went wrong while deleting the tmp file.");}
+//        }
+//    }
 
 
 

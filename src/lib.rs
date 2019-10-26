@@ -67,7 +67,7 @@ impl InternalNode {
     }
 }
 
-pub fn key_value(pat: &str, record: String) -> Result<String, String> {
+pub fn key_value(pat: &str, record: &str) -> Result<String, String> {
     let record_inner = record.clone();
     let record_inner: Vec<&str> = record_inner.split("\n").collect();
     for context in record_inner {
@@ -98,19 +98,11 @@ pub fn internal_pool_sort(internal_chunk_sort_pool: &mut Vec<RawRecord>, interna
 
     let mut dir_set = 0;
 
-    for i in 1..internal_chunk_sort_pool.len() / 10000 + 2 {
-        match create_dir_all(format!("/tmp/rec_chunk_{}/{}", internal_chunk_count, i)) {
-            Ok(file) => (),
-            Err(error) => {
-                panic!("Something error while creating temporary record directory. Details: {:?}", error);
-            }
-        };
-    }
-
     let mut record_append = String::with_capacity(queue_size);
     let mut current_chunk_no = 0;
     for (idx, record) in internal_chunk_sort_pool.iter().enumerate() {
-        if record_append.len() + record.record_size.len() > queue_size {
+        if record_append.len() + record.raw_record.len() > queue_size {
+            println!("{} {}", record_append.len(), record.raw_record.len());
             let mut chunk_file = match OpenOptions::new()
                 .append(true)
                 .create(true)
@@ -120,7 +112,7 @@ pub fn internal_pool_sort(internal_chunk_sort_pool: &mut Vec<RawRecord>, interna
                     panic!("Something error while creating temporary record file. Details: {:?}", error);
                 }
             };
-            chunk_file.write(&record.raw_record.as_bytes());
+            chunk_file.write(&record_append.as_bytes());
             record_append.clear();
             current_chunk_no += 1;
         } else {
