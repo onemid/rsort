@@ -3,10 +3,11 @@ use std::fs::{File, OpenOptions, create_dir_all};
 use std::cmp::Ordering;
 use std::io::{BufRead, BufReader, LineWriter, Write, Read};
 use std::collections::VecDeque;
+use std::str;
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Queue {
-    pub queue: VecDeque<RawRecord>,
+    pub queue: VecDeque<RawRecord> ,
     pub current_size: usize,
     pub record_cnt: usize,
     pub end_of_record: bool
@@ -34,8 +35,8 @@ pub struct RawRecord {
 
 impl RawRecord {
     pub fn new_raw_record() -> RawRecord {
-        RawRecord {
-            raw_record: "".to_string(),
+         RawRecord {
+            raw_record: String::from(""),
             record_size: 0,
             record_key_value: None,
             record_secondary_key_value: None,
@@ -66,7 +67,7 @@ impl InternalNode {
     }
 }
 
-pub fn key_value(pat: &str, record: &str) -> Result<String, String> {
+pub fn key_value(pat: &str, record: String) -> Result<String, String> {
     let record_inner = record.clone();
     let record_inner: Vec<&str> = record_inner.split("\n").collect();
     for context in record_inner {
@@ -77,7 +78,7 @@ pub fn key_value(pat: &str, record: &str) -> Result<String, String> {
     Err("".to_string())
 }
 
-pub fn internal_pool_sort(internal_chunk_sort_pool: &mut Vec<RawRecord>, internal_chunk_count: usize){
+pub fn internal_pool_sort(internal_chunk_sort_pool: &mut Vec<RawRecord>, internal_chunk_count: usize, queue_size: usize){
     internal_chunk_sort_pool.sort_by(|a, b|
         {
             if a.record_key_value.cmp(&b.record_key_value) != Ordering::Equal {
@@ -105,26 +106,26 @@ pub fn internal_pool_sort(internal_chunk_sort_pool: &mut Vec<RawRecord>, interna
             }
         };
     }
+
+    let mut record_append = String::with_capacity(queue_size);
+    let mut current_chunk_no = 0;
     for (idx, record) in internal_chunk_sort_pool.iter().enumerate() {
-        if idx % 10000 == 0 {
-            dir_set += 1;
-            match create_dir_all(format!("/tmp/rec_chunk_{}/{}", internal_chunk_count, dir_set)) {
-                Ok(file) => (),
+        if record_append.len() + record.record_size.len() > queue_size {
+            let mut chunk_file = match OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(format!("/tmp/rec_chunk_{}/rec_{:010}", internal_chunk_count, current_chunk_no)) {
+                Ok(file) => file,
                 Err(error) => {
-                    panic!("Something error while creating temporary record directory. Details: {:?}", error);
+                    panic!("Something error while creating temporary record file. Details: {:?}", error);
                 }
             };
+            chunk_file.write(&record.raw_record.as_bytes());
+            record_append.clear();
+            current_chunk_no += 1;
+        } else {
+            record_append.push_str(record.raw_record.as_str());
         }
-        let mut chunk_file = match OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(format!("/tmp/rec_chunk_{}/{}/rec_{:010}", internal_chunk_count, dir_set, idx)) {
-            Ok(file) => file,
-            Err(error) => {
-                panic!("Something error while creating temporary record file. Details: {:?}", error);
-            }
-        };
-        chunk_file.write(&record.raw_record.as_bytes());
     }
 }
 

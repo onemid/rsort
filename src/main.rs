@@ -127,7 +127,6 @@ fn main() {
     let e_ele_size = chunk_size;
 
     // Initialising the winner tree
-
     let mut external_node: Vec<Box<Option<RawRecord>>> =vec![Box::new(None); e_ele_size];
     external_node.push(Box::new(Some(RawRecord::new_raw_record()))); // set a terminator
 
