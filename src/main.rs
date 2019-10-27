@@ -115,8 +115,7 @@ fn main() {
 
     let record_queue = Queue {
         queue: VecDeque::with_capacity(queue_size),
-        current_size: 0,
-        record_cnt: 0,
+        current_chunk: 0,
         end_of_record: false
     };
 //    let mut queue_pool: Arc<Vec<Box<Queue>>> = Arc::new(vec![Box::new(record_queue); chunk_size]);
@@ -168,10 +167,6 @@ fn main() {
                 let mut queue = &mut queue_pool[i];
                 let rec = queue.queue.pop_front();
                 *external_node[i] = rec;
-                queue.current_size -= match &*external_node[i] {
-                    Some(rec) => rec.record_size,
-                    None => 0
-                }
             }
         }
 
@@ -184,18 +179,18 @@ fn main() {
 
         match &*external_node[top] {
             Some(rec) => {
-                let r = match &rec.record_key_value {
-                    Some(s) => s.clone(),
-                    None => "".to_string()
-                };
-                match result_file.write(r.as_bytes()) {
+//                let r = match &rec.record_key_value {
+//                    Some(s) => s.clone(),
+//                    None => "".to_string()
+//                };
+                match result_file.write(rec.raw_record.as_bytes()) {
                     Ok(_size) => (),
                     Err(_e) => {panic!("Write error");}
                 }
-                match result_file.write('\n'.to_string().as_bytes()) {
-                    Ok(_size) => (),
-                    Err(_e) => {panic!("Write error");}
-                }
+//                match result_file.write('\n'.to_string().as_bytes()) {
+//                    Ok(_size) => (),
+//                    Err(_e) => {panic!("Write error");}
+//                }
             },
             None => {
                 break;
@@ -219,13 +214,13 @@ fn main() {
 
     }
 
-    // clean up the file
-//    for i in 0..chunk_size {
-//        match remove_dir_all(format!("/tmp/rec_chunk_{}", i)) {
-//            Ok(()) => {},
-//            Err(_e) => {panic!("Something went wrong while deleting the tmp file.");}
-//        }
-//    }
+//     clean up the file
+    for i in 0..chunk_size {
+        match remove_dir_all(format!("/tmp/rec_chunk_{}", i)) {
+            Ok(()) => {},
+            Err(_e) => {panic!("Something went wrong while deleting the tmp file.");}
+        }
+    }
 
 
 

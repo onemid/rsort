@@ -4,12 +4,13 @@ use std::cmp::Ordering;
 use std::io::{BufRead, BufReader, LineWriter, Write, Read};
 use std::collections::VecDeque;
 use std::str;
+use std::slice;
+use std::mem;
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Queue {
     pub queue: VecDeque<RawRecord> ,
-    pub current_size: usize,
-    pub record_cnt: usize,
+    pub current_chunk: usize,
     pub end_of_record: bool
 }
 
@@ -17,8 +18,7 @@ impl Queue {
     pub fn new_queue() -> Queue {
         Queue {
             queue: VecDeque::new(),
-            current_size: 0,
-            record_cnt: 0,
+            current_chunk: 0,
             end_of_record: true
         }
     }
@@ -99,6 +99,8 @@ pub fn internal_pool_sort(internal_chunk_sort_pool: &mut Vec<RawRecord>, interna
     let mut dir_set = 0;
 
     let mut record_append = String::with_capacity(queue_size);
+    let mut record_map: Vec<usize> = Vec::new();
+    record_map.push(0);
     let mut current_chunk_no = 0;
     for (idx, record) in internal_chunk_sort_pool.iter().enumerate() {
         if record_append.len() + record.raw_record.len() > queue_size {
@@ -112,17 +114,73 @@ pub fn internal_pool_sort(internal_chunk_sort_pool: &mut Vec<RawRecord>, interna
                     panic!("Something error while creating temporary record file. Details: {:?}", error);
                 }
             };
+            let mut chunk_file_map = match OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(format!("/tmp/rec_chunk_{}/rec_map_{:010}", internal_chunk_count, current_chunk_no)) {
+                Ok(file) => file,
+                Err(error) => {
+                    panic!("Something error while creating temporary record file. Details: {:?}", error);
+                }
+            };
             chunk_file.write(&record_append.as_bytes());
+            let slice_u8 = unsafe {
+                slice::from_raw_parts(
+                    record_map.as_ptr() as *const u8,
+                    record_map.len() * mem::size_of::<usize>(),
+                )
+            };
+            chunk_file_map.write_all(&slice_u8);
+
+//            chunk_file.flush().unwrap();
+//            chunk_file_map.flush().unwrap();
+
             record_append.clear();
+            record_map.clear();
             current_chunk_no += 1;
+            record_map.push(0);
         } else {
             record_append.push_str(record.raw_record.as_str());
+            record_map.push(record_append.len());
         }
     }
+
+    // push the remain into chunk
+    let mut chunk_file = match OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(format!("/tmp/rec_chunk_{}/rec_{:010}", internal_chunk_count, current_chunk_no)) {
+        Ok(file) => file,
+        Err(error) => {
+            panic!("Something error while creating temporary record file. Details: {:?}", error);
+        }
+    };
+    let mut chunk_file_map = match OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(format!("/tmp/rec_chunk_{}/rec_map_{:010}", internal_chunk_count, current_chunk_no)) {
+        Ok(file) => file,
+        Err(error) => {
+            panic!("Something error while creating temporary record file. Details: {:?}", error);
+        }
+    };
+    chunk_file.write(&record_append.as_bytes());
+    let slice_u8 = unsafe {
+        slice::from_raw_parts(
+            record_map.as_ptr() as *const u8,
+            record_map.len() * mem::size_of::<usize>(),
+        )
+    };
+    chunk_file_map.write_all(&slice_u8);
+
+    record_append.clear();
+    record_map.clear();
+    current_chunk_no += 1;
+    record_map.push(0);
 }
 
 pub fn fill_the_queue(queue: &mut Queue,
-                      queue_dir_num: usize,
+                      chunk_dir_serial: usize,
                       queue_size: usize,
                       primary_key_pat: &String,
                       secondary_key_pat: &String) {
@@ -130,10 +188,9 @@ pub fn fill_the_queue(queue: &mut Queue,
     while queue.end_of_record != true {
 
         let mut record_files = match File::open(
-            format!("/tmp/rec_chunk_{}/{}/rec_{:010}",
-                    queue_dir_num,
-                    queue.record_cnt / 10000 + 1,
-                    queue.record_cnt)
+            format!("/tmp/rec_chunk_{}/rec_{:010}",
+                    chunk_dir_serial,
+                    queue.current_chunk)
         ) {
             Ok(rec_file) => rec_file,
             Err(error) => {
@@ -149,9 +206,33 @@ pub fn fill_the_queue(queue: &mut Queue,
             }
         };
 
-        if (queue.current_size + record_file_meta.len() as usize) < queue_size {
-            let mut record = String::new();
-            record_files.read_to_string(&mut record);
+        let mut record_map_files = match File::open(
+            format!("/tmp/rec_chunk_{}/rec_map_{:010}",
+                    chunk_dir_serial,
+                    queue.current_chunk)
+        ) {
+            Ok(rec_file) => rec_file,
+            Err(error) => {
+                queue.end_of_record = true;
+                return;
+            }
+        };
+
+        let mut record_all = String::new();
+        record_files.read_to_string(&mut record_all);
+
+        let mut map_u8 = Vec::new();
+        record_map_files.read_to_end(&mut map_u8);
+
+        let mut map_usize = unsafe {
+          slice::from_raw_parts(map_u8.as_ptr() as *const usize,
+          map_u8.len() * mem::size_of::<u8>())
+        };
+
+        for i in 0..map_usize.len()-1 {
+            if map_usize[i] > map_usize[i+1] || map_usize[i] > record_all.len() || map_usize[i+1] > record_all.len() {break;}
+            println!("{} {}", map_usize[i], map_usize[i+1]);
+            let mut record = String::from(&record_all[map_usize[i]..map_usize[i+1]]);
             // parsing primary key
             let mut primary_key_value = match key_value(
                 &primary_key_pat.as_str(),
@@ -176,11 +257,8 @@ pub fn fill_the_queue(queue: &mut Queue,
                 record_secondary_key_value: Some(secondary_key_value),
                 record_end: false
             });
-            queue.record_cnt += 1;
-            queue.current_size += record_file_meta.len() as usize;
-        } else {
-            return ;
         }
+        queue.current_chunk += 1;
     }
 }
 
