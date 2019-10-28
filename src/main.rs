@@ -1,14 +1,21 @@
 use std::fs::{File, OpenOptions, remove_dir_all};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Write, BufWriter};
 use std::collections::VecDeque;
-use rsort::{key_value, fill_the_queue, winner_tree_by_idx, internal_pool_sort, InternalNode, RawRecord, Queue};
+use rsort::{key_value, fill_the_queue, winner_tree_by_idx, internal_pool_sort, InternalNode, RawRecord, Queue, key_pos};
+use std::cmp::Ordering;
 
 fn main() {
     //find . -name 'rec_*' | xargs rm
-    let filename = String::from("ettoday.rec");
-    let rec_begin_pat = String::from("@Gais_REC:\n");
-    let primary_key_pat = String::from("@url:");
-    let secondary_key_pat = String::from("@SiteCode:");
+    let filename = String::from("youtube2017.0000.rec");
+    let rec_begin_pat = String::from("@\n");
+    let primary_key_pat = String::from("@viewCount:");
+    let secondary_key_pat = String::from("@duration:");
+
+//    let filename = String::from("ettoday.rec");
+//    let rec_begin_pat = String::from("@Gais_REC:\n");
+//    let primary_key_pat = String::from("@url:");
+//    let secondary_key_pat = String::from("@url:");
+
 
     let file = match File::open(filename) {
         Ok(file) => file,
@@ -50,41 +57,30 @@ fn main() {
     let mut record_tmp: String = String::new();
 
     if true {
-        while match reader.read_until(0xA, &mut line) {
+        while match reader.read_until(b'\n', &mut line) {
             Ok(read_size) => read_size > 0,
             Err(error) => {
                 panic!("Something error while reading line. Details: {:?}", error);
             }
         } {
             let repaired_line = String::from_utf8_lossy(&line);
-            if repaired_line.contains(&rec_begin_pat) {
+
+            if repaired_line.starts_with(&rec_begin_pat) {
                 // write back the record
                 // 1. check the record_tmp len
                 if record_tmp.len() > 0 {
                     if internal_chunk_sort_pool_cur_size + record_tmp.len() < memory_size {
+                        let mut key_pos =
+                            vec![key_pos(&primary_key_pat, &record_tmp),
+                                 key_pos(&secondary_key_pat, &record_tmp)];
                         internal_chunk_sort_pool.push(RawRecord {
                             raw_record: record_tmp.clone(),
-                            record_size: record_tmp.len(),
-                            record_key_value: Some(match key_value(
-                                &primary_key_pat.as_str(),
-                                &record_tmp.as_str()
-                            ) {
-                                Ok(str) => str,
-                                Err(str) => str
-                            }),
-                            record_secondary_key_value: Some(match key_value(
-                                &secondary_key_pat.as_str(),
-                                &record_tmp.as_str()
-                            ) {
-                                Ok(str) => str,
-                                Err(str) => str
-                            },
-                            ),
+                            key_pos,
                             record_end: false
                         });
                         internal_chunk_sort_pool_cur_size += record_tmp.len()
                     } else { // performing internal sort and write back to the file
-                        internal_pool_sort(&mut internal_chunk_sort_pool, internal_chunk_count, queue_size);
+                        internal_pool_sort(&mut internal_chunk_sort_pool, internal_chunk_count, queue_size, &primary_key_pat, &secondary_key_pat);
                         internal_chunk_sort_pool.clear();
                         internal_chunk_sort_pool_cur_size = 0;
                         internal_chunk_count += 1;
@@ -98,7 +94,7 @@ fn main() {
             line.clear();
         }
         // write back the remain things
-        internal_pool_sort(&mut internal_chunk_sort_pool, internal_chunk_count, queue_size);
+        internal_pool_sort(&mut internal_chunk_sort_pool, internal_chunk_count, queue_size, &primary_key_pat, &secondary_key_pat);
         internal_chunk_sort_pool.clear();
     }
 
@@ -138,7 +134,7 @@ fn main() {
 
 
     println!("Starting to sort");
-    let mut result_file = match OpenOptions::new()
+    let mut result_file = BufWriter::new(match OpenOptions::new()
         .write(true)
         .create(true)
         .open(format!("/tmp/result_rec_url")) {
@@ -146,7 +142,9 @@ fn main() {
         Err(error) => {
             panic!("Something error while creating temporary result record file. Details: {:?}", error);
         }
-    };
+    });
+
+    let mut previous_record = RawRecord::new_raw_record();
 
     loop {
 
@@ -171,7 +169,7 @@ fn main() {
         }
 
         // 2. Send the winner tree array to loser tree function to choose the winner
-        let top = winner_tree_by_idx(&mut internal_node, &mut external_node);
+        let top = winner_tree_by_idx(&mut internal_node, &mut external_node, &primary_key_pat, &secondary_key_pat);
         rec_cnt += 1;
         if rec_cnt % 10000 == 0 {
             println!("{}", rec_cnt);
@@ -183,6 +181,26 @@ fn main() {
 //                    Some(s) => s.clone(),
 //                    None => "".to_string()
 //                };
+                // verify the monotonic inc.
+//                if rec_cnt > 1 {
+//                    match previous_record.raw_record[previous_record.key_pos[0].0..previous_record.key_pos[0].1]
+//                        .cmp(&rec.raw_record[rec.key_pos[0].0..rec.key_pos[0].1]) {
+//                        Ordering::Equal => {
+//                            match previous_record.raw_record[previous_record.key_pos[1].0..previous_record.key_pos[1].1]
+//                                .cmp(&rec.raw_record[rec.key_pos[1].0..rec.key_pos[1].1]) {
+//                                Ordering::Greater => { println!("SECONDARY_KEY ERROR, should be smaller {}", rec_cnt); }, // right node
+//                                Ordering::Less => {}, // left node
+//                                _ => {}
+//                            }
+//                        },
+//                        Ordering::Greater => {
+//                            println!("PRIMARY_KEY: ERROR, should be smaller {}", rec_cnt);
+//                        }, // right node
+//                        Ordering::Less => {} // left node
+//                    }
+//                }
+//
+//                previous_record = rec.clone();
                 match result_file.write(rec.raw_record.as_bytes()) {
                     Ok(_size) => (),
                     Err(_e) => {panic!("Write error");}
@@ -218,10 +236,8 @@ fn main() {
     for i in 0..chunk_size {
         match remove_dir_all(format!("/tmp/rec_chunk_{}", i)) {
             Ok(()) => {},
-            Err(_e) => {panic!("Something went wrong while deleting the tmp file.");}
+            Err(_) => {println!("Has wrong while deleting the tmp files");}
         }
     }
-
-
 
 }
