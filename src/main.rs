@@ -34,23 +34,24 @@ fn main() {
     // The initial settings
     // ---------------------M------K------B---
     let memory_size: usize = 512 * 1024 * 1024; // 16 GB
+    let chunk_size: usize = memory_size / 2;
     let total_size: usize = file_meta.len() as usize; // this is the total file size
-    let queue_count: usize = match total_size / memory_size == 0 {
+    let queue_count: usize = match total_size / chunk_size == 0 {
         true => 1,
-        false => 2.0f64.powf(((total_size as f64 / memory_size as f64).log2()).ceil()) as usize
+        false => 2.0f64.powf(((total_size as f64 / chunk_size as f64).log2()).ceil()) as usize
     };
     // queue_count, or called K-way
     // the chuck_size must be the power of 2; the formula is 2 ^ ceil of lg N.
 
-    let queue_size: usize =  (memory_size as f64 / queue_count as f64).ceil() as usize;
+    let queue_size: usize =  (chunk_size as f64 / queue_count as f64).ceil() as usize;
     // there are 2-way to pick up the queue_size, one is mem_size/queue_count,
     // but if the total data cannot distribute evenly, we may calc the total rec size and div by queue_count
 
-    let mut internal_chunk_sort_pool: Vec<RawRecord> = Vec::with_capacity(memory_size);
+    let mut internal_chunk_sort_pool: Vec<RawRecord> = Vec::with_capacity(chunk_size);
     let mut internal_chunk_sort_pool_cur_size = 0;
     let mut internal_chunk_count = 0;
 
-    println!("{} {} {} {}",  memory_size, total_size, queue_count, queue_size);
+    println!("{} {} {} {}",  chunk_size, total_size, queue_count, queue_size);
 
     // To parsing the record, using BufReader
     let mut reader = BufReader::new(file);
@@ -71,7 +72,7 @@ fn main() {
                 // write back the record
                 // 1. check the record_tmp len
                 if record_tmp.len() > 0 {
-                    if internal_chunk_sort_pool_cur_size + record_tmp.len() < memory_size {
+                    if internal_chunk_sort_pool_cur_size + record_tmp.len() < chunk_size {
                         let mut key_pos =
                             vec![key_pos(&primary_key_pat, &record_tmp),
                                  key_pos(&secondary_key_pat, &record_tmp)];
