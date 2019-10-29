@@ -3,6 +3,7 @@ use std::io::{BufRead, BufReader, Write, BufWriter};
 use std::collections::VecDeque;
 use rsort::{key_value, fill_the_queue, winner_tree_by_idx, internal_pool_sort, InternalNode, RawRecord, Queue, key_pos};
 use std::cmp::Ordering;
+use std::time::{Duration, Instant};
 
 fn main() {
     //find . -name 'rec_*' | xargs rm
@@ -34,28 +35,29 @@ fn main() {
     // ---------------------M------K------B---
     let memory_size: usize = 512 * 1024 * 1024; // 16 GB
     let total_size: usize = file_meta.len() as usize; // this is the total file size
-    let chunk_size: usize = match total_size / memory_size == 0 {
+    let queue_count: usize = match total_size / memory_size == 0 {
         true => 1,
         false => 2.0f64.powf(((total_size as f64 / memory_size as f64).log2()).ceil()) as usize
     };
-    // chunk_size, or called K-way
+    // queue_count, or called K-way
     // the chuck_size must be the power of 2; the formula is 2 ^ ceil of lg N.
 
-    let queue_size: usize =  (memory_size as f64 / chunk_size as f64).ceil() as usize;
-    // there are 2-way to pick up the queue_size, one is mem_size/chunk_size,
-    // but if the total data cannot distribute evenly, we may calc the total rec size and div by chunk_size
+    let queue_size: usize =  (memory_size as f64 / queue_count as f64).ceil() as usize;
+    // there are 2-way to pick up the queue_size, one is mem_size/queue_count,
+    // but if the total data cannot distribute evenly, we may calc the total rec size and div by queue_count
 
     let mut internal_chunk_sort_pool: Vec<RawRecord> = Vec::with_capacity(memory_size);
     let mut internal_chunk_sort_pool_cur_size = 0;
     let mut internal_chunk_count = 0;
 
-    println!("{} {} {} {}",  memory_size, total_size, chunk_size, queue_size);
+    println!("{} {} {} {}",  memory_size, total_size, queue_count, queue_size);
 
     // To parsing the record, using BufReader
     let mut reader = BufReader::new(file);
     let mut line: Vec<u8> = Vec::new();
     let mut record_tmp: String = String::new();
 
+    let start = Instant::now();
     if true {
         while match reader.read_until(b'\n', &mut line) {
             Ok(read_size) => read_size > 0,
@@ -98,6 +100,8 @@ fn main() {
         internal_chunk_sort_pool.clear();
     }
 
+    let duration = start.elapsed();
+    println!("Time elapsed in Initialising(Data Preprocess) is: {:?}", duration);
     // Performing the K-way external merge sort
     // initialising the K-way buffer
     // we confirm that all the queues have the data
@@ -114,12 +118,12 @@ fn main() {
         current_chunk: 0,
         end_of_record: false
     };
-//    let mut queue_pool: Arc<Vec<Box<Queue>>> = Arc::new(vec![Box::new(record_queue); chunk_size]);
-    let mut queue_pool: Vec<Box<Queue>> = vec![Box::new(record_queue); chunk_size];
+//    let mut queue_pool: Arc<Vec<Box<Queue>>> = Arc::new(vec![Box::new(record_queue); queue_count]);
+    let mut queue_pool: Vec<Box<Queue>> = vec![Box::new(record_queue); queue_count];
 
     // Compute the total loser tree elements
-    let i_ele_size = chunk_size;
-    let e_ele_size = chunk_size;
+    let i_ele_size = queue_count;
+    let e_ele_size = queue_count;
 
     // Initialising the winner tree
     let mut external_node: Vec<Box<Option<RawRecord>>> =vec![Box::new(None); e_ele_size];
@@ -145,12 +149,12 @@ fn main() {
     });
 
     let mut previous_record = RawRecord::new_raw_record();
-
+    let start = Instant::now();
     loop {
 
         // Iterating all the first element in each queue, and load the record from the file
 
-        for i in 0..chunk_size {
+        for i in 0..queue_count {
             // check the queue top whether is the empty mark
             let mut queue = &mut queue_pool[i];
             // Initialising the queue.
@@ -160,7 +164,7 @@ fn main() {
 
 
         // 1. Pick up the record from top of queues, the initial run.
-        for i in 0..chunk_size {
+        for i in 0..queue_count {
             if *external_node[i] == None {
                 let mut queue = &mut queue_pool[i];
                 let rec = queue.queue.pop_front();
@@ -170,10 +174,10 @@ fn main() {
 
         // 2. Send the winner tree array to loser tree function to choose the winner
         let top = winner_tree_by_idx(&mut internal_node, &mut external_node, &primary_key_pat, &secondary_key_pat);
-        rec_cnt += 1;
-        if rec_cnt % 10000 == 0 {
-            println!("{}", rec_cnt);
-        }
+//        rec_cnt += 1;
+//        if rec_cnt % 10000 == 0 {
+//            println!("{}", rec_cnt);
+//        }
 
         match &*external_node[top] {
             Some(rec) => {
@@ -216,7 +220,7 @@ fn main() {
         }
 
         if *external_node[top] == None {
-            for i in 0..chunk_size {
+            for i in 0..queue_count {
                 // check the queue top whether is the empty mark
                 let queue = &mut queue_pool[i];
                 if queue.end_of_record == false {
@@ -231,12 +235,14 @@ fn main() {
         *external_node[top] = None;
 
     }
+    let duration = start.elapsed();
+    println!("Time elapsed in K-way external sorting is: {:?}", duration);
 
 //     clean up the file
-    for i in 0..chunk_size {
+    for i in 0..queue_count {
         match remove_dir_all(format!("/tmp/rec_chunk_{}", i)) {
             Ok(()) => {},
-            Err(_) => {println!("Has wrong while deleting the tmp files");}
+            Err(_) => {}
         }
     }
 
