@@ -10,7 +10,7 @@ fn main() {
     let filename = String::from("youtube2017.0000.rec");
     let rec_begin_pat = String::from("@\n");
     let primary_key_pat = String::from("@viewCount:");
-    let secondary_key_pat = String::from("@duration:");
+    let secondary_key_pat = String::from("@duration:"); //45:40
 
 //    let filename = String::from("ettoday.rec");
 //    let rec_begin_pat = String::from("@Gais_REC:\n");
@@ -33,7 +33,7 @@ fn main() {
 
     // The initial settings
     // ---------------------M------K------B---
-    let memory_size: usize = 512 * 1024 * 1024; // 16 GB
+    let memory_size: usize = 1024 * 1024 * 1024; // 16 GB
     let chunk_size: usize = memory_size / 2;
     let total_size: usize = file_meta.len() as usize; // this is the total file size
     let queue_count: usize = match total_size / chunk_size == 0 {
@@ -130,7 +130,7 @@ fn main() {
     let mut external_node: Vec<Box<Option<RawRecord>>> =vec![Box::new(None); e_ele_size];
     external_node.push(Box::new(Some(RawRecord::new_raw_record()))); // set a terminator
 
-    let mut sorted_buffer: Vec<String> = Vec::with_capacity(chunk_size);
+    let mut sorted_buffer: String = String::with_capacity(chunk_size);
 
     let mut internal_node = vec![InternalNode::new_non_leaf_inode(); i_ele_size / 2];
     for _i in 0..i_ele_size / 2 {
@@ -209,13 +209,12 @@ fn main() {
 //
 //                previous_record = rec.clone();
                 if sorted_buffer.len() + rec.raw_record.len() < chunk_size {
-                    sorted_buffer.push(rec.raw_record.clone());
+                    sorted_buffer.push_str(rec.raw_record.as_str());
                 } else {
-                    for buffer_rec in sorted_buffer.iter() {
-                        match result_file.write(buffer_rec.as_bytes()) {
-                            Ok(_size) => (),
-                            Err(_e) => {panic!("Write error");}
-                        }
+                    println!("WOW");
+                    match result_file.write(sorted_buffer.as_bytes()) {
+                        Ok(_size) => (),
+                        Err(_e) => {panic!("Write error");}
                     }
                     sorted_buffer.clear();
                 }
@@ -246,6 +245,11 @@ fn main() {
         *external_node[top] = None;
 
     }
+    match result_file.write(sorted_buffer.as_bytes()) {
+        Ok(_size) => (),
+        Err(_e) => {panic!("Write error");} // 56 05
+    }
+    sorted_buffer.clear();
     let duration = start.elapsed();
     println!("Time elapsed in K-way external sorting is: {:?}", duration);
 
@@ -254,7 +258,7 @@ fn main() {
         match remove_dir_all(format!("/tmp/rec_chunk_{}", i)) {
             Ok(()) => {},
             Err(_) => {}
-        }
+        }// 05 48
     }
 
 }
