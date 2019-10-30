@@ -130,6 +130,8 @@ fn main() {
     let mut external_node: Vec<Box<Option<RawRecord>>> =vec![Box::new(None); e_ele_size];
     external_node.push(Box::new(Some(RawRecord::new_raw_record()))); // set a terminator
 
+    let mut sorted_buffer: Vec<String> = Vec::with_capacity(chunk_size);
+
     let mut internal_node = vec![InternalNode::new_non_leaf_inode(); i_ele_size / 2];
     for _i in 0..i_ele_size / 2 {
         internal_node.push(InternalNode::new_leaf_inode())
@@ -206,10 +208,18 @@ fn main() {
 //                }
 //
 //                previous_record = rec.clone();
-                match result_file.write(rec.raw_record.as_bytes()) {
-                    Ok(_size) => (),
-                    Err(_e) => {panic!("Write error");}
+                if sorted_buffer.len() + rec.raw_record.len() < chunk_size {
+                    sorted_buffer.push(rec.raw_record.clone());
+                } else {
+                    for buffer_rec in sorted_buffer.iter() {
+                        match result_file.write(buffer_rec.as_bytes()) {
+                            Ok(_size) => (),
+                            Err(_e) => {panic!("Write error");}
+                        }
+                    }
+                    sorted_buffer.clear();
                 }
+
 //                match result_file.write('\n'.to_string().as_bytes()) {
 //                    Ok(_size) => (),
 //                    Err(_e) => {panic!("Write error");}
