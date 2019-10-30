@@ -141,7 +141,7 @@ fn main() {
 
 
     println!("Starting to sort");
-    let mut result_file = BufWriter::new(match OpenOptions::new()
+    let mut result_file = match OpenOptions::new()
         .write(true)
         .create(true)
         .open(format!("/tmp/result_rec_url")) {
@@ -149,7 +149,7 @@ fn main() {
         Err(error) => {
             panic!("Something error while creating temporary result record file. Details: {:?}", error);
         }
-    });
+    };
 
     let mut previous_record = RawRecord::new_raw_record();
     let start = Instant::now();
