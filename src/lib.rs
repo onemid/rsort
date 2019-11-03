@@ -85,11 +85,35 @@ pub fn key_pos(pat: &str, record: &str) -> (usize, usize) {
     }
     pos
 }
+
+pub fn compare_of_two_nodes(left_node: &RawRecord,
+                            right_node: &RawRecord,
+                            left_idx: usize,
+                            right_idx: usize) -> usize {
+    match left_node.raw_record[left_node.key_pos[0].0..left_node.key_pos[0].1]
+        .cmp(&right_node.raw_record[right_node.key_pos[0].0..right_node.key_pos[0].1]) {
+        Ordering::Equal => {
+            match left_node.raw_record[left_node.key_pos[1].0..left_node.key_pos[1].1]
+                .cmp(&right_node.raw_record[right_node.key_pos[1].0..right_node.key_pos[1].1]) {
+                Ordering::Equal => { left_idx }, // left node
+                Ordering::Greater => { right_idx }, // right node
+                Ordering::Less => { left_idx } // left node
+            }
+        },
+        Ordering::Greater => {
+            right_idx
+        }, // right node
+        Ordering::Less => {
+            left_idx
+        } // left node
+    }
+}
+
 pub fn internal_pool_sort(internal_chunk_sort_pool: &mut Vec<RawRecord>,
                           internal_chunk_count: usize,
                           queue_size: usize,
                           primary_key_pat: &str,
-                          secondary_key_pat: &str){
+                          secondary_key_pat: &str) -> usize{
     println!("Into Internal Pool Sort");
     internal_chunk_sort_pool.par_sort_unstable_by( |a, b|
         {
@@ -120,6 +144,7 @@ pub fn internal_pool_sort(internal_chunk_sort_pool: &mut Vec<RawRecord>,
     let mut record_key_map: Vec<usize> = Vec::new();
     let mut current_chunk_no = 0;
     let mut current_size = 0;
+    let mut rec_cnt = 0;
 
     let mut chunk_file = BufWriter::new(match OpenOptions::new()
         .append(true)
@@ -192,16 +217,15 @@ pub fn internal_pool_sort(internal_chunk_sort_pool: &mut Vec<RawRecord>,
                     panic!("Something error while creating temporary record file. Details: {:?}", error);
                 }
             };
-
-        } else {
-            chunk_file.write(&record.raw_record.as_bytes());
-            current_size += record.raw_record.len();
-            record_map.push(current_size);
-            record_key_map.push(record.key_pos[0].0);
-            record_key_map.push(record.key_pos[0].1);
-            record_key_map.push(record.key_pos[1].0);
-            record_key_map.push(record.key_pos[1].1);
         }
+        chunk_file.write(&record.raw_record.as_bytes());
+        rec_cnt += 1;
+        current_size += record.raw_record.len();
+        record_map.push(current_size);
+        record_key_map.push(record.key_pos[0].0);
+        record_key_map.push(record.key_pos[0].1);
+        record_key_map.push(record.key_pos[1].0);
+        record_key_map.push(record.key_pos[1].1);
     }
     let slice_u8 = unsafe {
         slice::from_raw_parts(
@@ -217,6 +241,7 @@ pub fn internal_pool_sort(internal_chunk_sort_pool: &mut Vec<RawRecord>,
     };
     chunk_file_map.write_all(&slice_u8);
     chunk_file_key_map.write_all(&key_map_u8);
+    rec_cnt
 }
 
 pub fn fill_the_queue(queue: &mut Queue,
@@ -327,23 +352,8 @@ pub fn winner_tree_by_idx(internal_node: &mut Vec<InternalNode>, external_node: 
                 internal_node[i].ptr = Some(e_cur_cnt);
             } else {
                 internal_node[i].ptr = Some(
-                    match left_node.raw_record[left_node.key_pos[0].0..left_node.key_pos[0].1]
-                        .cmp(&right_node.raw_record[right_node.key_pos[0].0..right_node.key_pos[0].1]) {
-                        Ordering::Equal => {
-                            match left_node.raw_record[left_node.key_pos[1].0..left_node.key_pos[1].1]
-                                .cmp(&right_node.raw_record[right_node.key_pos[1].0..right_node.key_pos[1].1]) {
-                                Ordering::Equal => { e_cur_cnt }, // left node
-                                Ordering::Greater => { e_cur_cnt + 1 }, // right node
-                                Ordering::Less => { e_cur_cnt } // left node
-                            }
-                        },
-                        Ordering::Greater => {
-                            e_cur_cnt + 1
-                        }, // right node
-                        Ordering::Less => {
-                            e_cur_cnt
-                        } // left node
-                    });
+                    compare_of_two_nodes(&left_node, &right_node, e_cur_cnt, e_cur_cnt + 1)
+                );
             }
         }
         e_cur_cnt += 2;
@@ -381,21 +391,9 @@ pub fn winner_tree_by_idx(internal_node: &mut Vec<InternalNode>, external_node: 
                 } else if left_node.record_end == false && right_node.record_end == true{
                     internal_node[i].ptr = Some(left_node_idx);
                 } else {
-                    internal_node[i].ptr = Some(match left_node.raw_record[left_node.key_pos[0].0..left_node.key_pos[0].1].cmp(&right_node.raw_record[right_node.key_pos[0].0..right_node.key_pos[0].1]) {
-                        Ordering::Equal => {
-                            match left_node.raw_record[left_node.key_pos[1].0..left_node.key_pos[1].1].cmp(&right_node.raw_record[right_node.key_pos[1].0..right_node.key_pos[1].1]) {
-                                Ordering::Equal => { left_node_idx }, // left node
-                                Ordering::Greater => { right_node_idx }, // right node
-                                Ordering::Less => { left_node_idx } // left node
-                            }
-                        },
-                        Ordering::Greater => {
-                            right_node_idx
-                        }, // right node
-                        Ordering::Less => {
-                            left_node_idx
-                        } // left node
-                    });
+                    internal_node[i].ptr = Some(
+                        compare_of_two_nodes(&left_node, &right_node, left_node_idx, right_node_idx)
+                    );
                 }
             }
         }
