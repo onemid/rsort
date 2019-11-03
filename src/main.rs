@@ -8,8 +8,6 @@ use rsort::{key_value, fill_the_queue, winner_tree_by_idx, internal_pool_sort, I
 use std::cmp::Ordering;
 use std::time::{Duration, Instant};
 
-
-
 fn main() {
     let matches = App::new("rsort")
         .version("0.1")
@@ -77,9 +75,9 @@ fn main() {
             .unwrap_or_default() * 1024 * 1024;
     let parallel_threads: usize =
         (matches.value_of("parallel_threads")
-            .unwrap_or("0"))
+            .unwrap_or("1"))
             .parse::<usize>()
-            .unwrap_or(0);
+            .unwrap_or(1);
 
 
 //    let filename = String::from("youtube2017.0000.rec");
@@ -134,34 +132,21 @@ fn main() {
     let mut original_rec = 0;
     let mut inner_pool_rec = 0;
     let mut af_inner_pool_rec = 0;
-
+    let mut read_size = 0;
     let mut parsing_rec = 0;
 
     let start = Instant::now();
-    while match reader.read_until(b'\n', &mut line) {
-        Ok(read_size) => read_size > 0,
-        Err(error) => {
-            panic!("Something error while reading line. Details: {:?}", error);
-        }
-    } {
+    loop {
+        read_size = reader.read_until(b'\n', &mut line).unwrap();
         let repaired_line = String::from_utf8_lossy(&line);
 
-        if repaired_line.starts_with(&rec_begin_pat) {
+        if repaired_line.starts_with(&rec_begin_pat) || read_size == 0 {
             // write back the record
             // 1. check the record_tmp len
+            original_rec += 1;
+
             if record_tmp.len() > 0 {
-                if internal_chunk_sort_pool_cur_size + record_tmp.len() < chunk_size {
-                    let key_pos =
-                        vec![key_pos(&primary_key_pat, &record_tmp),
-                             key_pos(&secondary_key_pat, &record_tmp)];
-                    internal_chunk_sort_pool.push(RawRecord {
-                        raw_record: record_tmp.clone(),
-                        key_pos,
-                        record_end: false
-                    });
-                    internal_chunk_sort_pool_cur_size += record_tmp.len();
-                    original_rec += 1;
-                } else { // performing internal sort and write back to the file
+                if internal_chunk_sort_pool_cur_size + record_tmp.len() > chunk_size {
                     inner_pool_rec += internal_chunk_sort_pool.len();
                     parsing_rec += internal_pool_sort(&mut internal_chunk_sort_pool, internal_chunk_count, queue_size, &primary_key_pat, &secondary_key_pat);
                     af_inner_pool_rec += internal_chunk_sort_pool.len();
@@ -171,10 +156,24 @@ fn main() {
                     internal_chunk_count += 1;
                 }
 
+                let key_pos =
+                    vec![key_pos(&primary_key_pat, &record_tmp),
+                         key_pos(&secondary_key_pat, &record_tmp)];
+                internal_chunk_sort_pool.push(RawRecord {
+                    raw_record: record_tmp.clone(),
+                    key_pos,
+                    record_end: false
+                });
+                internal_chunk_sort_pool_cur_size += record_tmp.len();
                 record_tmp.clear();
 
             }
         }
+
+        if read_size == 0 {
+            break;
+        }
+
         record_tmp.push_str(&repaired_line);
         line.clear();
     }
@@ -263,10 +262,10 @@ fn main() {
 
         // 2. Send the winner tree array to loser tree function to choose the winner
         let top = winner_tree_by_idx(&mut internal_node, &mut external_node, &primary_key_pat, &secondary_key_pat);
-//        rec_cnt += 1;
-//        if rec_cnt % 10000 == 0 {
-//            println!("{}", rec_cnt);
-//        }
+        rec_cnt += 1;
+        if rec_cnt % 10000 == 0 {
+            println!("{}", rec_cnt);
+        }
 
         match &*external_node[top] {
             Some(rec) => {
@@ -274,26 +273,26 @@ fn main() {
 //                    Some(s) => s.clone(),
 //                    None => "".to_string()
 //                };
-                // verify the monotonic inc.
-//                if rec_cnt > 1 {
-//                    match previous_record.raw_record[previous_record.key_pos[0].0..previous_record.key_pos[0].1]
-//                        .cmp(&rec.raw_record[rec.key_pos[0].0..rec.key_pos[0].1]) {
-//                        Ordering::Equal => {
-//                            match previous_record.raw_record[previous_record.key_pos[1].0..previous_record.key_pos[1].1]
-//                                .cmp(&rec.raw_record[rec.key_pos[1].0..rec.key_pos[1].1]) {
-//                                Ordering::Greater => { println!("SECONDARY_KEY ERROR, should be smaller {}", rec_cnt); }, // right node
-//                                Ordering::Less => {}, // left node
-//                                _ => {}
-//                            }
-//                        },
-//                        Ordering::Greater => {
-//                            println!("PRIMARY_KEY: ERROR, should be smaller {}", rec_cnt);
-//                        }, // right node
-//                        Ordering::Less => {} // left node
-//                    }
-//                }
-//
-//                previous_record = rec.clone();
+//                 verify the monotonic inc.
+                if rec_cnt > 1 {
+                    match previous_record.raw_record[previous_record.key_pos[0].0..previous_record.key_pos[0].1]
+                        .cmp(&rec.raw_record[rec.key_pos[0].0..rec.key_pos[0].1]) {
+                        Ordering::Equal => {
+                            match previous_record.raw_record[previous_record.key_pos[1].0..previous_record.key_pos[1].1]
+                                .cmp(&rec.raw_record[rec.key_pos[1].0..rec.key_pos[1].1]) {
+                                Ordering::Greater => { println!("SECONDARY_KEY ERROR, should be smaller {}", rec_cnt); }, // right node
+                                Ordering::Less => {}, // left node
+                                _ => {}
+                            }
+                        },
+                        Ordering::Greater => {
+                            println!("PRIMARY_KEY: ERROR, should be smaller {}", rec_cnt);
+                        }, // right node
+                        Ordering::Less => {} // left node
+                    }
+                }
+
+                previous_record = rec.clone();
                 if sorted_buffer.len() + rec.raw_record.len() > chunk_size {
                     println!("WOW");
                     match result_file.write(sorted_buffer.as_bytes()) {
