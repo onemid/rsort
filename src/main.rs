@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate clap;
+extern crate rayon;
 use clap::{App, Arg};
 use std::fs::{File, OpenOptions, remove_dir_all};
 use std::io::{BufRead, BufReader, Write, BufWriter};
@@ -7,6 +8,7 @@ use std::collections::VecDeque;
 use rsort::{key_value, fill_the_queue, winner_tree_by_idx, internal_pool_sort, InternalNode, RawRecord, Queue, key_pos};
 use std::cmp::Ordering;
 use std::time::{Duration, Instant};
+use rayon::prelude::*;
 
 fn main() {
     let matches = App::new("rsort")
@@ -274,35 +276,35 @@ fn main() {
 //                    None => "".to_string()
 //                };
 //                 verify the monotonic inc.
-                if rec_cnt > 1 {
-                    match previous_record.raw_record[previous_record.key_pos[0].0..previous_record.key_pos[0].1]
-                        .cmp(&rec.raw_record[rec.key_pos[0].0..rec.key_pos[0].1]) {
-                        Ordering::Equal => {
-                            match previous_record.raw_record[previous_record.key_pos[1].0..previous_record.key_pos[1].1]
-                                .cmp(&rec.raw_record[rec.key_pos[1].0..rec.key_pos[1].1]) {
-                                Ordering::Greater => { println!("SECONDARY_KEY ERROR, should be smaller {}", rec_cnt); }, // right node
-                                Ordering::Less => {}, // left node
-                                _ => {}
-                            }
-                        },
-                        Ordering::Greater => {
-                            println!("PRIMARY_KEY: ERROR, should be smaller {}", rec_cnt);
-                        }, // right node
-                        Ordering::Less => {} // left node
-                    }
-                }
-
-                previous_record = rec.clone();
-                if sorted_buffer.len() + rec.raw_record.len() > chunk_size {
-                    println!("WOW");
-                    match result_file.write(sorted_buffer.as_bytes()) {
-                        Ok(_size) => (),
-                        Err(_e) => {panic!("Write error");}
-                    }
-                    sorted_buffer.clear();
-
-                }
-                result_rec += 1;
+//                if rec_cnt > 1 {
+//                    match previous_record.raw_record[previous_record.key_pos[0].0..previous_record.key_pos[0].1]
+//                        .cmp(&rec.raw_record[rec.key_pos[0].0..rec.key_pos[0].1]) {
+//                        Ordering::Equal => {
+//                            match previous_record.raw_record[previous_record.key_pos[1].0..previous_record.key_pos[1].1]
+//                                .cmp(&rec.raw_record[rec.key_pos[1].0..rec.key_pos[1].1]) {
+//                                Ordering::Greater => { println!("SECONDARY_KEY ERROR, should be smaller {}", rec_cnt); }, // right node
+//                                Ordering::Less => {}, // left node
+//                                _ => {}
+//                            }
+//                        },
+//                        Ordering::Greater => {
+//                            println!("PRIMARY_KEY: ERROR, should be smaller {}", rec_cnt);
+//                        }, // right node
+//                        Ordering::Less => {} // left node
+//                    }
+//                }
+//
+//                previous_record = rec.clone();
+//                if sorted_buffer.len() + rec.raw_record.len() > chunk_size {
+//                    println!("WOW");
+//                    match result_file.write(sorted_buffer.as_bytes()) {
+//                        Ok(_size) => (),
+//                        Err(_e) => {panic!("Write error");}
+//                    }
+//                    sorted_buffer.clear();
+//
+//                }
+//                result_rec += 1;
                 sorted_buffer.push_str(rec.raw_record.as_str());
 
 //                match result_file.write('\n'.to_string().as_bytes()) {
