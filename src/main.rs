@@ -295,16 +295,16 @@ fn main() {
 //                }
 //
 //                previous_record = rec.clone();
-//                if sorted_buffer.len() + rec.raw_record.len() > chunk_size {
-//                    println!("WOW");
-//                    match result_file.write(sorted_buffer.as_bytes()) {
-//                        Ok(_size) => (),
-//                        Err(_e) => {panic!("Write error");}
-//                    }
-//                    sorted_buffer.clear();
-//
-//                }
-//                result_rec += 1;
+                if sorted_buffer.len() + rec.raw_record.len() > chunk_size {
+                    println!("WOW");
+                    match result_file.write(sorted_buffer.as_bytes()) {
+                        Ok(_size) => (),
+                        Err(_e) => {panic!("Write error");}
+                    }
+                    sorted_buffer.clear();
+
+                }
+                result_rec += 1;
                 sorted_buffer.push_str(rec.raw_record.as_str());
 
 //                match result_file.write('\n'.to_string().as_bytes()) {
