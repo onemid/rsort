@@ -263,7 +263,7 @@ fn main() {
         }
 
         // 2. Send the winner tree array to loser tree function to choose the winner
-        let top = winner_tree_by_idx(&mut internal_node, &mut external_node, &primary_key_pat, &secondary_key_pat);
+        let top = winner_tree_by_idx(&mut internal_node, &mut external_node);
         rec_cnt += 1;
         if rec_cnt % 10000 == 0 {
             println!("{}", rec_cnt);

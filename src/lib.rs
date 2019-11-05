@@ -95,9 +95,15 @@ pub fn compare_of_two_nodes(left_node: &RawRecord,
         Ordering::Equal => {
             match left_node.raw_record[left_node.key_pos[1].0..left_node.key_pos[1].1]
                 .cmp(&right_node.raw_record[right_node.key_pos[1].0..right_node.key_pos[1].1]) {
-                Ordering::Equal => { left_idx }, // left node
-                Ordering::Greater => { right_idx }, // right node
-                Ordering::Less => { left_idx } // left node
+                Ordering::Equal => {
+                    left_idx
+                }, // left node
+                Ordering::Greater => {
+                    right_idx
+                }, // right node
+                Ordering::Less => {
+                    left_idx
+                } // left node
             }
         },
         Ordering::Greater => {
@@ -109,13 +115,30 @@ pub fn compare_of_two_nodes(left_node: &RawRecord,
     }
 }
 
+pub fn compare_of_two_nodes_output_order(left_node: &RawRecord,
+                            right_node: &RawRecord) -> Ordering {
+    match left_node.raw_record[left_node.key_pos[0].0..left_node.key_pos[0].1]
+        .cmp(&right_node.raw_record[right_node.key_pos[0].0..right_node.key_pos[0].1]) {
+        Ordering::Equal => {
+            left_node.raw_record[left_node.key_pos[1].0..left_node.key_pos[1].1]
+                .cmp(&right_node.raw_record[right_node.key_pos[1].0..right_node.key_pos[1].1])
+        },
+        Ordering::Greater => {
+                Ordering::Greater
+        }, // right node
+        Ordering::Less => {
+                Ordering::Less
+        } // left node
+    }
+}
+
 pub fn internal_pool_sort(internal_chunk_sort_pool: &mut Vec<RawRecord>,
                           internal_chunk_count: usize,
                           queue_size: usize,
                           primary_key_pat: &str,
                           secondary_key_pat: &str) -> usize{
     println!("Into Internal Pool Sort");
-    internal_chunk_sort_pool.par_sort_unstable_by( |a, b|
+    internal_chunk_sort_pool.sort_unstable_by( |a, b|
         {
             let a_record_key_value = &a.raw_record.as_str()[a.key_pos[0].0..a.key_pos[0].1];
             let b_record_key_value = &b.raw_record.as_str()[b.key_pos[0].0..b.key_pos[0].1];
@@ -328,7 +351,49 @@ pub fn fill_the_queue(queue: &mut Queue,
     }
 }
 
-pub fn winner_tree_by_idx(internal_node: &mut Vec<InternalNode>, external_node: &mut Vec<Box<Option<RawRecord>>>, primary_key_pat: &str, secondary_key_pat: &str) -> usize {
+pub fn two_pass_internal_sort(first_pass: &mut Vec<Box<Option<RawRecord>>>, second_pass: &mut Vec<Box<Option<RawRecord>>>) -> VecDeque<usize> {
+    let mut result = VecDeque::new();
+    first_pass.par_sort_by(|a, b| {
+        let left_node = match &**a {
+            Some(rec) => { rec.clone() },
+            None => {RawRecord::new_raw_record()}
+        };
+        let right_node = match &**b {
+            Some(rec) => { rec.clone() },
+            None => {RawRecord::new_raw_record()}
+        };
+        compare_of_two_nodes_output_order(&left_node, &right_node)
+    });
+    second_pass.par_sort_by(|a, b| {
+        let left_node = match &**a {
+            Some(rec) => { rec.clone() },
+            None => {RawRecord::new_raw_record()}
+        };
+        let right_node = match &**b {
+            Some(rec) => { rec.clone() },
+            None => {RawRecord::new_raw_record()}
+        };
+        compare_of_two_nodes_output_order(&left_node, &right_node)
+    });
+    // pick up the min of second pass
+    let mut second_pass_min = match &*second_pass[0] {
+        Some(rec) => { rec.clone() },
+        None => {RawRecord::new_raw_record()}
+    };
+    for i in 0..first_pass.len() {
+        let mut first_pass_ele = match &*first_pass[i] {
+            Some(rec) => { rec.clone() },
+            None => {RawRecord::new_raw_record()}
+        };
+        if first_pass_ele == second_pass_min {
+            result.push_back(i);
+            *first_pass[i] = None;
+        }
+    }
+    result
+}
+
+pub fn winner_tree_by_idx(internal_node: &mut Vec<InternalNode>, external_node: &mut Vec<Box<Option<RawRecord>>>) -> usize {
     // initialising the internal node leaf by looking up the external node
     let mut i_tree_size = internal_node.len(); // internal tree size
     let mut terminator_pos = i_tree_size;
